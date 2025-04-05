@@ -1,24 +1,23 @@
+import asyncio
 import html
+import os
+import pickle
+import platform
 from collections import deque, defaultdict
 from io import BytesIO
 from urllib.parse import urlparse
 
 import aiofiles
 import aiohttp
-import os
-import asyncio
-import pickle
-
 import ffmpeg
 from PIL import Image
 from dotenv import load_dotenv
+from telegram import Bot, InputMediaPhoto, InputMediaVideo
 from telegram.request import HTTPXRequest
-from telegram import Bot, InputMediaPhoto, InputMediaVideo, InputMediaAnimation, InputFile
 
 load_dotenv()  # Загружаем переменные из .env
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-
 TAGS_34 = os.getenv("TAGS_34", "").split(",")
 WEBSITE_34 = os.getenv("WEBSITE_34")
 POST_URL_34 = os.getenv("POST_URL_34")
@@ -29,18 +28,23 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 LIMIT_CAPTION = 1024  # Лимит символов описания поста телеграмм
 LIMIT_TEXT_MSG = 4096  # Лимит символов для одного сообщения телеграмм
 MAX_MEDIA_PER_GROUP = 10  # Лимит Telegram на медиа-группу
-MAX_SIZE_MB = 10  # Максимальный размер фото в MB
-MAX_TOTAL_DIMENSIONS = 10000  # Максимальная сумма ширины и высоты
-MAX_ASPECT_RATIO = 20  # Максимальное соотношение сторон
-MAX_WIDTH_IMG = 5000  # Максимальные размеры изображений, которые не выходят за лимиты
-MAX_HEIGHT_IMG = 5000
+MAX_SIZE_IMG_MB = 10  # Максимальный размер фото в MB
+MAX_SIZE_VIDEO_MB = 50  # Максимальный размер видео в MB
+
 
 # Списки
-LIMIT = 40
+LIMIT = 40 #Лимит прогрузки постов по одному тегу
 DATA_FOLDER = "temp_data"  # Папка где хранятся временно скачанные файлы
-SAVE_FILE = "sent_posts.pkl"
-MAX_POSTS = 50
-FFMPEG_PATH = r"C:\MyApp\Bot\ParserInTelegramBot\lib\ffmpeg.exe"  # Укажи свой путь
+SAVE_FILE = "sent_posts.pkl"# Файл данными об отправленных постах
+MAX_POSTS = 70 #Количество постов для сохранения в отправленных
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Папка, где лежит main.py
+if platform.system() == "Windows": # FFmpeg мультимедийный фреймворк для работы с медиафайлами
+    FFMPEG_PATH = os.path.join(BASE_DIR, "lib", "ffmpeg.exe") #https://ffmpeg.org/download.html
+    if not os.path.exists(FFMPEG_PATH):
+        raise FileNotFoundError(f"FFmpeg не найден по пути {FFMPEG_PATH}, скачай его: https://ffmpeg.org/download.html")
+else:
+    FFMPEG_PATH = "ffmpeg"  # В Linux ffmpeg доступен в PATH, если отсутствует (apt install ffmpeg)
+
 
 posts = []  # Неотправленные посты
 sent_posts = defaultdict(lambda: deque(maxlen=MAX_POSTS))  # ID отправленных постов (отдельно для каждого сайта) с авто удалением старых записей
@@ -62,15 +66,15 @@ async def load_sent_posts():
                 sent_posts = defaultdict(lambda: deque(maxlen=MAX_POSTS),
                                          {key: deque(value, maxlen=MAX_POSTS) for key, value in loaded_data.items()})
                 print("Данные успешно загружены!")
-                print(f"sent_posts: {sent_posts}")
+                #print(f"sent_posts: {sent_posts}")
     except FileNotFoundError:
         print("Файл с сохраненными постами не найден, создаем новый.")
     except Exception as e:
         print(f"Ошибка при загрузке: {e}")
 #Сохранение отправленных постов sent_posts в файл SAVE_FILE
 async def save_sent_posts():
-    print("Сохранение перед выходом...")
-    print(f"Сохраняем данные: {sent_posts}")
+    print("Сохранение данных перед выходом...")
+    #print(f"Сохраняем данные: {sent_posts}")
 
     # Преобразуем defaultdict в обычный dict, иначе pickle не сможет его сохранить
     normal_dict = {key: list(value) for key, value in sent_posts.items()}
@@ -84,8 +88,8 @@ async def save_sent_posts():
 
 # Функция добавления нового поста (с проверкой дубликатов)
 async def save_post(post_id, post_url, title, file_url,tag):
-    if post_id in sent_posts or any(post["post_id"] == post_id for post in posts):
-        print(f"Пост {post_id} уже есть в базе. Пропускаем.")
+    if post_id in sent_posts[tag] or any(post["post_id"] == post_id for post in posts):
+        #print(f"Пост {post_id} уже есть в базе. Пропускаем.")
         return
 
     posts.append({
@@ -96,43 +100,88 @@ async def save_post(post_id, post_url, title, file_url,tag):
         "tag": tag,
         "send": "not"
     })
-    print(f"Добавлен пост {post_id}")
+    #print(f"Добавлен пост {post_id}")
 
 # Функция отправки постов в Телеграм
 async def send_posts():
     global posts
 
     if not posts:
-        print("Нет новых постов для отправки.")
+        #print("Нет новых постов для отправки.")
         await clear_data_folder() #Если все посты отправлены, то скачанные можно удалять
         return
 
     for post in posts[:]:  # Копия списка, чтобы можно было изменять оригинал
-        #print(f'Posts:{posts}')
         first = True
         media_group = []
         animations = []  # Список для GIF-анимаций
 
-        caption = f'<a href="{post['post_url']}">Пост {post['post_id']}</a> : {post['title']}'  # Эта будет ссылкой на пост
-        caption_post = caption[:LIMIT_CAPTION] + "..." if len(caption) > LIMIT_CAPTION else caption #Обрезаем длину Caption если доходит до лимита
+        caption_full = f'<a href="{post['post_url']}">Пост {post['post_id']}</a> : {post['title']}'  # Эта будет ссылкой на пост
+        caption_post = caption_full[:LIMIT_CAPTION] + "..." if len(caption_full) > LIMIT_CAPTION else caption_full #Обрезаем длину Caption если доходит до лимита
         ext_file = get_file_extension(post['file_url'])
-        #content = post["file_url"] if post["file_url"].startswith("http") else InputFile(post["file_url"])
 
+        #Картинки
         if ext_file in("jpeg","jpg","png"):
-            media_group.append(InputMediaPhoto(media=InputFile(post["file_url"]) if not post["file_url"].startswith("http") else post["file_url"],
-                                    caption=caption_post if first else None,
-                                    parse_mode="HTML"))
+            match post["send"]:
+                case "not": # Файл еще не отправлялся
+                    media_group.append(InputMediaPhoto(media=post["file_url"],
+                                            caption=caption_post if first else None,
+                                            parse_mode="HTML"))
+                case "err": # Файл отправляли, была ошибка
+                    downloaded_file = await download_media(post["file_url"])
+                    with open(downloaded_file, 'rb') as file:
+                        if downloaded_file:
+                            media_group.append(InputMediaPhoto(
+                                media=file.read(),
+                                caption=caption_post if first else None,
+                                parse_mode="HTML"))
+        #Видео
         elif ext_file == "mp4":
-            media_group.append(InputMediaVideo(media=InputFile(post["file_url"]) if not post["file_url"].startswith("http") else post["file_url"],
-                                    caption=caption_post if first else None,
-                                    parse_mode="HTML"))
+            match post["send"]:
+                case "not":
+                    media_group.append(InputMediaVideo(media=post["file_url"],
+                                                       caption=caption_post if first else None,
+                                                       parse_mode="HTML"))
+                case "err":
+                    downloaded_file = await download_media(post["file_url"])
+                    with open(downloaded_file, 'rb') as file:
+                        if downloaded_file:
+                            media_group.append(InputMediaVideo(
+                                media=file.read(),
+                                caption=caption_post if first else None,
+                                parse_mode="HTML"))
+        #GIF файлы
         elif ext_file == "gif":
-            animations.append(InputFile(post["file_url"]) if not post["file_url"].startswith("http") else post["file_url"])
+            match post["send"]:
+                case "not":
+                    animations.append(post["file_url"])
+                case "err": #GIF файлы если не удалось отправить когда качаем мы его конвертируем в видео MP4
+                    downloaded_file = await download_media(post["file_url"])
+                    with open(downloaded_file, 'rb') as file:
+                        if downloaded_file:
+                            media_group.append(InputMediaVideo(
+                                media=file.read(),
+                                caption=caption_post if first else None,
+                                parse_mode="HTML"))
         else:
             continue  # Пропускаем неизвестные форматы
 
         first = False  # Сбрасываем флаг после первого элемента
-        print(f"media_group = {media_group}")
+
+        if media_group:
+            try:#Отправка медиа файлов
+                    await bot.send_media_group(chat_id=TELEGRAM_CHAT_ID, media=media_group)
+                    post["send"] = "yes"
+            except Exception as e:
+                if post["send"] == "not":
+                    post["send"] = "err"
+                else:
+                    post["send"] = "close"
+                    # Раз никак не удалось отправить пост то отправляем просто ссылку на пост и его теги
+                    caption_dont_send = f'<a href="{post['file_url']}">🖼 Файл не загрузился, вот ссылка</a> \n\n {caption_post}'
+                    caption_dont = caption_dont_send[:LIMIT_CAPTION] + "..." if len(caption_dont_send) > LIMIT_CAPTION else caption_dont_send  # Обрезаем длину Caption если доходит до лимита
+                    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=caption_dont, parse_mode="HTML")
+                print(f"Ошибка отправки поста {post['post_id']}: {e}")
 
         if animations:
             try:
@@ -144,28 +193,15 @@ async def send_posts():
                         post["send"] = "yes"
             except Exception as e:
                 if post["send"] == "not":
-                    downloaded_file = await download_media(post["file_url"])
-                    if downloaded_file:
-                            post['file_url'] = downloaded_file
-                            post["send"] = "err"
-                    else: post["send"] = "close"
-                #Потом вернуть else: post["send"] = "close"
+                        post["send"] = "err"
+                else:
+                    post["send"] = "close"
+                    #Раз никак не удалось отправить пост то отправляем просто ссылку на пост и его теги
+                    caption_dont_send = f'<a href="{post['file_url']}">🖼 Файл не загрузился, вот ссылка</a> \n\n {caption_post}'
+                    caption_dont = caption_dont_send[:LIMIT_CAPTION] + "..." if len(caption_dont_send) > LIMIT_CAPTION else caption_dont_send  # Обрезаем длину Caption если доходит до лимита
+                    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=caption_dont, parse_mode="HTML")
                 print(f"Ошибка отправки поста {post['post_id']}: {e}")
 
-        if media_group:
-            try:#Отправка медиа файлов
-                    await bot.send_media_group(chat_id=TELEGRAM_CHAT_ID, media=media_group)
-                    post["send"] = "yes"
-            except Exception as e:
-                if post["send"] == "not":
-                    downloaded_file = await download_media(post["file_url"])
-                    if downloaded_file:
-                            post['file_url'] = downloaded_file
-                            post["send"] = "err"
-                    else:
-                        post["send"] = "close"
-                #Потом вернуть else: post["send"] = "close"
-                print(f"Ошибка отправки поста {post['post_id']}: {e}")
 
         if post["send"] in {"yes", "close"}:
             # Добавляем в список отправленных и удаляем из текущего списка
@@ -183,8 +219,8 @@ async def clear_data_folder():
             except Exception as e:
                 print(f"Ошибка при удалении {file_path}: {e}")
 
-
-async def compress_image(image_bytes, max_size=10 * 1024 * 1024):
+#Сжатие картинок если они больше MAX_SIZE_IMG_MB
+async def compress_image(image_bytes, max_size=MAX_SIZE_IMG_MB * 1024 * 1024):
     img = Image.open(BytesIO(image_bytes))
     img = img.convert("RGB")  # Убираем прозрачность
     output = BytesIO()
@@ -199,6 +235,7 @@ async def compress_image(image_bytes, max_size=10 * 1024 * 1024):
 
     return output.getvalue()
 
+#Сжатие видео с помощью FFMPEG
 async def compress_video(input_path, output_path):
     print(f"Сжимаем видео: {input_path} -> {output_path}")
 
@@ -223,14 +260,14 @@ async def compress_video(input_path, output_path):
 
     return os.path.exists(output_path)
 
+#Функция конвертации Gif в Mp4
 async def gif_to_mp4(input_path, output_path):
     ffmpeg.input(input_path).output(
         output_path, vcodec="libx264", crf=28, preset="fast"
     ).run(overwrite_output=True)
     return output_path
 
-
-#Скачивает медиафайлы на диск
+#Скачивает медиафайлы на диск со сжатием
 async def download_media(url):
     headers = {  # Делаем шапку чтобы не ругался и не блокировали доступ к файлам
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/122.0.0.0",
@@ -259,20 +296,20 @@ async def download_media(url):
                         img_file.write(compressed_bytes)
 
                 elif ext in ['mp4', 'avi', 'mov', 'mkv', 'webm', 'gif']:
-                    temp_path = file_path + "_temp"
+                    temp_path = file_path + "_temp" #Файл сперва скачиваем как _temp
                     async with aiofiles.open(temp_path, 'wb') as file:
                         await file.write(file_bytes)
                     if ext == "gif":  # Всегда конвертируем GIF → MP4
                         compressed_path = file_path.replace(".gif", ".mp4")
                         await gif_to_mp4(temp_path, compressed_path)
-                    elif os.path.getsize(temp_path) < 50 * 1024 * 1024:  # 50 МБ
-                        print(f"Видео {temp_path} меньше 50 МБ, сжатие не требуется.")
+                    elif os.path.getsize(temp_path) < MAX_SIZE_VIDEO_MB * 1024 * 1024:  # Сжатие видео до MAX_SIZE_VIDEO_MB
+                        print(f"Видео {temp_path} меньше {MAX_SIZE_VIDEO_MB} МБ, сжатие не требуется.")
                         compressed_path = temp_path  # Используем как есть
                     else:
                         compressed_path = file_path
                         await compress_video(temp_path, compressed_path)
 
-                    os.rename(compressed_path, file_path)
+                    os.rename(compressed_path, file_path) # А потом как все операции с медиафайлом сделаны мы его переименуем, удаляем _temp
                 else:
                     print("Ошибка: неподдерживаемый формат файла")
                     return None
@@ -291,8 +328,6 @@ def get_file_extension(url):
     if len(parts) == 2 and parts[1]:  # Если есть расширение (т.е. состоит из 2 частей) возвращаем в нижнем регистре
         return parts[1].lower()
     return ""  # Если расширения нет, возвращаем пустую строку
-
-
 
 
 async def fetch_html(url):
