@@ -41,7 +41,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Папка, где ле
 if platform.system() == "Windows": # FFmpeg мультимедийный фреймворк для работы с медиафайлами
     FFMPEG_PATH = os.path.join(BASE_DIR, "lib", "ffmpeg.exe") #https://ffmpeg.org/download.html
     if not os.path.exists(FFMPEG_PATH):
-        raise FileNotFoundError(f"FFmpeg не найден по пути {FFMPEG_PATH}, скачай его: https://ffmpeg.org/download.html")
+        raise FileNotFoundError(f"FFmpeg not found at path {FFMPEG_PATH}, download it: https://ffmpeg.org/download.html")
 else:
     FFMPEG_PATH = "ffmpeg"  # В Linux ffmpeg доступен в PATH, если отсутствует (apt install ffmpeg)
 
@@ -65,25 +65,24 @@ async def load_sent_posts():
                 # Преобразуем обратно в defaultdict с deque
                 sent_posts = defaultdict(lambda: deque(maxlen=MAX_POSTS),
                                          {key: deque(value, maxlen=MAX_POSTS) for key, value in loaded_data.items()})
-                print("Данные успешно загружены!")
+                print("Sent posts data successfully loaded!")
                 #print(f"sent_posts: {sent_posts}")
     except FileNotFoundError:
-        print("Файл с сохраненными постами не найден, создаем новый.")
+        print("File with saved posts not found, create a new one.")
     except Exception as e:
-        print(f"Ошибка при загрузке: {e}")
+        print(f"Error loading: {e}")
 #Сохранение отправленных постов sent_posts в файл SAVE_FILE
 async def save_sent_posts():
-    print("Сохранение данных перед выходом...")
-    #print(f"Сохраняем данные: {sent_posts}")
+    print("Saving data before exiting...")
 
     # Преобразуем defaultdict в обычный dict, иначе pickle не сможет его сохранить
     normal_dict = {key: list(value) for key, value in sent_posts.items()}
     try:
         async with aiofiles.open(SAVE_FILE, "wb") as file:
             await file.write(pickle.dumps(normal_dict))
-        print("Данные успешно сохранены!")
+        print("Data saved successfully!")
     except Exception as e:
-        print(f"Ошибка при сохранении: {e}")
+        print(f"Error while saving: {e}")
 
 
 # Функция добавления нового поста (с проверкой дубликатов)
@@ -129,8 +128,8 @@ async def send_posts():
                                             parse_mode="HTML"))
                 case "err": # Файл отправляли, была ошибка
                     downloaded_file = await download_media(post["file_url"])
-                    with open(downloaded_file, 'rb') as file:
-                        if downloaded_file:
+                    if downloaded_file:
+                        with open(downloaded_file, 'rb') as file:
                             media_group.append(InputMediaPhoto(
                                 media=file.read(),
                                 caption=caption_post if first else None,
@@ -144,8 +143,8 @@ async def send_posts():
                                                        parse_mode="HTML"))
                 case "err":
                     downloaded_file = await download_media(post["file_url"])
-                    with open(downloaded_file, 'rb') as file:
-                        if downloaded_file:
+                    if downloaded_file:
+                        with open(downloaded_file, 'rb') as file:
                             media_group.append(InputMediaVideo(
                                 media=file.read(),
                                 caption=caption_post if first else None,
@@ -157,8 +156,8 @@ async def send_posts():
                     animations.append(post["file_url"])
                 case "err": #GIF файлы если не удалось отправить когда качаем мы его конвертируем в видео MP4
                     downloaded_file = await download_media(post["file_url"])
-                    with open(downloaded_file, 'rb') as file:
-                        if downloaded_file:
+                    if downloaded_file:
+                        with open(downloaded_file, 'rb') as file:
                             media_group.append(InputMediaVideo(
                                 media=file.read(),
                                 caption=caption_post if first else None,
@@ -180,8 +179,11 @@ async def send_posts():
                     # Раз никак не удалось отправить пост то отправляем просто ссылку на пост и его теги
                     caption_dont_send = f'<a href="{post['file_url']}">🖼 Файл не загрузился, вот ссылка</a> \n\n {caption_post}'
                     caption_dont = caption_dont_send[:LIMIT_CAPTION] + "..." if len(caption_dont_send) > LIMIT_CAPTION else caption_dont_send  # Обрезаем длину Caption если доходит до лимита
-                    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=caption_dont, parse_mode="HTML")
-                print(f"Ошибка отправки поста {post['post_id']}: {e}")
+                    try:
+                        await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=caption_dont, parse_mode="HTML")
+                    except Exception as e:
+                        print(f"Error sending message: {e}")
+                print(f"Error sending post {post['post_id']}: {e}")
 
         if animations:
             try:
@@ -199,8 +201,11 @@ async def send_posts():
                     #Раз никак не удалось отправить пост то отправляем просто ссылку на пост и его теги
                     caption_dont_send = f'<a href="{post['file_url']}">🖼 Файл не загрузился, вот ссылка</a> \n\n {caption_post}'
                     caption_dont = caption_dont_send[:LIMIT_CAPTION] + "..." if len(caption_dont_send) > LIMIT_CAPTION else caption_dont_send  # Обрезаем длину Caption если доходит до лимита
-                    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=caption_dont, parse_mode="HTML")
-                print(f"Ошибка отправки поста {post['post_id']}: {e}")
+                    try:
+                        await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=caption_dont, parse_mode="HTML")
+                    except Exception as e:
+                        print(f"Error sending message: {e}")
+                print(f"Error sending post {post['post_id']}: {e}")
 
 
         if post["send"] in {"yes", "close"}:
@@ -217,7 +222,7 @@ async def clear_data_folder():
             try:
                 os.remove(file_path)
             except Exception as e:
-                print(f"Ошибка при удалении {file_path}: {e}")
+                print(f"Error deleting {file_path}: {e}")
 
 #Сжатие картинок если они больше MAX_SIZE_IMG_MB
 async def compress_image(image_bytes, max_size=MAX_SIZE_IMG_MB * 1024 * 1024):
@@ -237,7 +242,7 @@ async def compress_image(image_bytes, max_size=MAX_SIZE_IMG_MB * 1024 * 1024):
 
 #Сжатие видео с помощью FFMPEG
 async def compress_video(input_path, output_path):
-    print(f"Сжимаем видео: {input_path} -> {output_path}")
+    print(f"Compressing video: {input_path} -> {output_path}")
 
     command = [
         FFMPEG_PATH, "-y", "-i", input_path,
@@ -254,9 +259,9 @@ async def compress_video(input_path, output_path):
     stdout, stderr = await process.communicate()
 
     if process.returncode == 0:
-        print(f"Сжатие завершено: {output_path}")
+        print(f"Compression complete: {output_path}")
     else:
-        print(f"Ошибка сжатия! {stderr.decode()}")
+        print(f"Compression error! {stderr.decode()}")
 
     return os.path.exists(output_path)
 
@@ -285,38 +290,42 @@ async def download_media(url):
     os.makedirs(DATA_FOLDER, exist_ok=True)  # Создаем папку Data, если её нет
     file_path = os.path.join(DATA_FOLDER, filename)
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as response:
-            if response.status == 200:
-                file_bytes = await response.read()  # Скачиваем файл как байты
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    file_bytes = await response.read()  # Скачиваем файл как байты
 
-                if ext in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']:
-                    compressed_bytes = await compress_image(file_bytes)
-                    with open(file_path, 'wb') as img_file:
-                        img_file.write(compressed_bytes)
+                    if ext in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']:
+                        compressed_bytes = await compress_image(file_bytes)
+                        with open(file_path, 'wb') as img_file:
+                            img_file.write(compressed_bytes)
 
-                elif ext in ['mp4', 'avi', 'mov', 'mkv', 'webm', 'gif']:
-                    temp_path = file_path + "_temp" #Файл сперва скачиваем как _temp
-                    async with aiofiles.open(temp_path, 'wb') as file:
-                        await file.write(file_bytes)
-                    if ext == "gif":  # Всегда конвертируем GIF → MP4
-                        compressed_path = file_path.replace(".gif", ".mp4")
-                        await gif_to_mp4(temp_path, compressed_path)
-                    elif os.path.getsize(temp_path) < MAX_SIZE_VIDEO_MB * 1024 * 1024:  # Сжатие видео до MAX_SIZE_VIDEO_MB
-                        print(f"Видео {temp_path} меньше {MAX_SIZE_VIDEO_MB} МБ, сжатие не требуется.")
-                        compressed_path = temp_path  # Используем как есть
+                    elif ext in ['mp4', 'avi', 'mov', 'mkv', 'webm', 'gif']:
+                        temp_path = file_path + "_temp" #Файл сперва скачиваем как _temp
+                        async with aiofiles.open(temp_path, 'wb') as file:
+                            await file.write(file_bytes)
+                        if ext == "gif":  # Всегда конвертируем GIF → MP4
+                            compressed_path = file_path.replace(".gif", ".mp4")
+                            await gif_to_mp4(temp_path, compressed_path)
+                        elif os.path.getsize(temp_path) < MAX_SIZE_VIDEO_MB * 1024 * 1024:  # Сжатие видео до MAX_SIZE_VIDEO_MB
+                            #print(f"Видео {temp_path} меньше {MAX_SIZE_VIDEO_MB} МБ, сжатие не требуется.")
+                            compressed_path = temp_path  # Используем как есть
+                        else:
+                            compressed_path = file_path
+                            await compress_video(temp_path, compressed_path)
+
+                        os.rename(compressed_path, file_path) # А потом как все операции с медиафайлом сделаны мы его переименуем, удаляем _temp
                     else:
-                        compressed_path = file_path
-                        await compress_video(temp_path, compressed_path)
+                        print("Error: Unsupported file format")
+                        return None
 
-                    os.rename(compressed_path, file_path) # А потом как все операции с медиафайлом сделаны мы его переименуем, удаляем _temp
+                    return file_path
                 else:
-                    print("Ошибка: неподдерживаемый формат файла")
-                    return None
-
-                return file_path
-            else:
-                print(f"Ошибка загрузки: {response.status}")
+                    print(f"Loading error: {response.status}")
+    except Exception as e:
+        print(f"Loading error: {file_path}: {e}")
+        return None
     return None
 
 # Узнаем какого разрешения файл по ссылке
@@ -337,7 +346,7 @@ async def fetch_html(url):
             if response.status == 200:
                 return await response.json()
             else:
-                print(f"Ошибка загрузки сайта: {response.status}")
+                print(f"Error loading site: {response.status}")
                 return None  # Вернем None, если страница не загрузилась
 
 # Основной цикл для проверки новых постов
@@ -348,7 +357,7 @@ async def monitor_website_34():
             html = await fetch_html(f"{WEBSITE_34}{tag}{viewed_tags}&limit={LIMIT}&json=1")
             viewed_tags =  f"{viewed_tags}+-{tag}"
             if not html:
-                print("Не удалось загрузить HTML, пропускаем итерацию.")
+                print("Failed to load HTML, skipping iteration.")
                 continue  # Пропускаем обработку этой страницы
 
             for post in html:
@@ -359,8 +368,7 @@ async def monitor_website_34():
                     title = post["tags"]
                     await save_post(post_id, post_url, title, file_url, tag)
     except Exception as e:
-        print(f"Ошибка: {e}")
-        print("Ошибка в посте: " + str(post_id))
+        print(f"Error in post {post_id}: {e}")
 
     # Задержка перед следующей проверкой
     await asyncio.sleep(10)  # Проверяем каждые 60 секунд
@@ -373,7 +381,7 @@ async def main():
             await send_posts()
             await asyncio.sleep(60)  # Ждём 60 секунд перед следующим запросом
     except (KeyboardInterrupt, asyncio.CancelledError):
-        print("Бот выключается...")
+        print("The bot is shutting down...")
     finally:
         await save_sent_posts()  # Сохранение перед выходом
         await clear_data_folder() # Удаляем скачанные файлы
