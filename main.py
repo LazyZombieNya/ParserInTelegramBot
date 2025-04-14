@@ -3,6 +3,7 @@ import html
 import os
 import pickle
 import platform
+import shutil
 from collections import deque, defaultdict
 from io import BytesIO
 from urllib.parse import urlparse
@@ -38,12 +39,19 @@ DATA_FOLDER = "temp_data"  # Папка где хранятся временно
 SAVE_FILE = "sent_posts.pkl"# Файл данными об отправленных постах
 MAX_POSTS = 70 #Количество постов для сохранения в отправленных
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Папка, где лежит main.py
-if platform.system() == "Windows": # FFmpeg мультимедийный фреймворк для работы с медиафайлами
+
+# FFmpeg мультимедийный фреймворк для работы с медиафайлами
+if platform.system() == "Windows":
     FFMPEG_PATH = os.path.join(BASE_DIR, "lib", "ffmpeg.exe") #https://ffmpeg.org/download.html
     if not os.path.exists(FFMPEG_PATH):
         raise FileNotFoundError(f"FFmpeg not found at path {FFMPEG_PATH}, download it: https://ffmpeg.org/download.html")
 else:
-    FFMPEG_PATH = "ffmpeg"  # В Linux ffmpeg доступен в PATH, если отсутствует (apt install ffmpeg)
+    # В Linux проверка, доступен ли ffmpeg в системном PATH
+    if shutil.which("ffmpeg") is None: #Проверяет, есть ли исполняемый файл ffmpeg в переменной окружения PATH
+        raise FileNotFoundError(
+            "FFmpeg not found in PATH. Install it: sudo apt install ffmpeg -y"
+        )
+    FFMPEG_PATH = "ffmpeg"
 
 
 posts = []  # Неотправленные посты
@@ -115,7 +123,7 @@ async def send_posts():
         media_group = []
         animations = []  # Список для GIF-анимаций
 
-        caption_full = f'<a href="{post['post_url']}">Пост {post['post_id']}</a> : {post['title']}'  # Эта будет ссылкой на пост
+        caption_full = f'<a href="{post["post_url"]}">Пост {post["post_id"]}</a> : {post["title"]}'  # Эта будет ссылкой на пост
         caption_post = caption_full[:LIMIT_CAPTION] + "..." if len(caption_full) > LIMIT_CAPTION else caption_full #Обрезаем длину Caption если доходит до лимита
         ext_file = get_file_extension(post['file_url'])
 
@@ -163,6 +171,7 @@ async def send_posts():
                                 caption=caption_post if first else None,
                                 parse_mode="HTML"))
         else:
+            post["send"] = "close"
             continue  # Пропускаем неизвестные форматы
 
         first = False  # Сбрасываем флаг после первого элемента
@@ -177,13 +186,13 @@ async def send_posts():
                 else:
                     post["send"] = "close"
                     # Раз никак не удалось отправить пост то отправляем просто ссылку на пост и его теги
-                    caption_dont_send = f'<a href="{post['file_url']}">🖼 Файл не загрузился, вот ссылка</a> \n\n {caption_post}'
+                    caption_dont_send = f'<a href="{post["file_url"]}">🖼 Файл не загрузился, вот ссылка</a> \n\n {caption_post}'
                     caption_dont = caption_dont_send[:LIMIT_CAPTION] + "..." if len(caption_dont_send) > LIMIT_CAPTION else caption_dont_send  # Обрезаем длину Caption если доходит до лимита
                     try:
                         await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=caption_dont, parse_mode="HTML")
                     except Exception as e:
                         print(f"Error sending message: {e}")
-                print(f"Error sending post {post['post_id']}: {e}")
+                print(f'Error sending post {post["post_id"]}: {e}')
 
         if animations:
             try:
@@ -199,13 +208,13 @@ async def send_posts():
                 else:
                     post["send"] = "close"
                     #Раз никак не удалось отправить пост то отправляем просто ссылку на пост и его теги
-                    caption_dont_send = f'<a href="{post['file_url']}">🖼 Файл не загрузился, вот ссылка</a> \n\n {caption_post}'
+                    caption_dont_send = f'<a href="{post["file_url"]}">🖼 Файл не загрузился, вот ссылка</a> \n\n {caption_post}'
                     caption_dont = caption_dont_send[:LIMIT_CAPTION] + "..." if len(caption_dont_send) > LIMIT_CAPTION else caption_dont_send  # Обрезаем длину Caption если доходит до лимита
                     try:
                         await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=caption_dont, parse_mode="HTML")
                     except Exception as e:
                         print(f"Error sending message: {e}")
-                print(f"Error sending post {post['post_id']}: {e}")
+                print(f'Error sending post {post["post_id"]}: {e}')
 
 
         if post["send"] in {"yes", "close"}:
@@ -286,7 +295,7 @@ async def download_media(url):
 
     ext = get_file_extension(url)
     if ext == "jpg": ext = "JPEG"  # Pillow не поддерживает "JPG", только "JPEG"
-    filename = f"temp_{url.split('/')[-1].lower()}"
+    filename = f"temp_{url.split('/')[-1].lower()[:50]}.{ext}"
     os.makedirs(DATA_FOLDER, exist_ok=True)  # Создаем папку Data, если её нет
     file_path = os.path.join(DATA_FOLDER, filename)
 
