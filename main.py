@@ -18,10 +18,14 @@ from telegram.request import HTTPXRequest
 
 load_dotenv()  # Загружаем переменные из .env
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-TAGS_34 = os.getenv("TAGS_34", "").split(",")
+TELEGRAM_CHAT_ID_T = os.getenv("TELEGRAM_CHAT_ID_T")
+TELEGRAM_CHAT_ID_V = os.getenv("TELEGRAM_CHAT_ID_V")
+TAGS_34_T = os.getenv("TAGS_34_T", "").split(",")
+TAGS_34_V = os.getenv("TAGS_34_V", "").split(",")
+UNWANTED_TAGS_34 =os.getenv("UNWANTED_TAGS_34")  # Нежелательные теги, посты с этим тегом будут пропущены
 WEBSITE_34 = os.getenv("WEBSITE_34")
 POST_URL_34 = os.getenv("POST_URL_34")
+RATING_POST = os.getenv("RATING_POST")
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"}
 
@@ -126,6 +130,10 @@ async def send_posts():
         caption_full = f'<a href="{post["post_url"]}">Пост {post["post_id"]}</a> : {post["title"]}'  # Эта будет ссылкой на пост
         caption_post = caption_full[:LIMIT_CAPTION] + "..." if len(caption_full) > LIMIT_CAPTION else caption_full #Обрезаем длину Caption если доходит до лимита
         ext_file = get_file_extension(post['file_url'])
+        if post["tag"] in TAGS_34_T:
+            TELEGRAM_CHAT_ID = TELEGRAM_CHAT_ID_T
+        if post["tag"] in TAGS_34_V:
+            TELEGRAM_CHAT_ID = TELEGRAM_CHAT_ID_V
 
         #Картинки
         if ext_file in("jpeg","jpg","png"):
@@ -358,12 +366,36 @@ async def fetch_html(url):
                 print(f"Error loading site: {response.status}")
                 return None  # Вернем None, если страница не загрузилась
 
-# Основной цикл для проверки новых постов
-async def monitor_website_34():
+# Основной цикл для проверки новых постов T
+async def monitor_website_34_T():
     try:
-        viewed_tags = ""
-        for tag in TAGS_34:
-            html = await fetch_html(f"{WEBSITE_34}{tag}{viewed_tags}&limit={LIMIT}&json=1")
+        viewed_tags = UNWANTED_TAGS_34
+        for tag in TAGS_34_T:
+            html = await fetch_html(f"{WEBSITE_34}{RATING_POST}{tag}{viewed_tags}&limit={LIMIT}&json=1")
+            viewed_tags =  f"{viewed_tags}+-{tag}"
+            if not html:
+                print("Failed to load HTML, skipping iteration.")
+                continue  # Пропускаем обработку этой страницы
+
+            for post in html:
+                post_id = post["id"]
+                if post_id not in sent_posts[tag]:
+                    file_url = post["file_url"]
+                    post_url = f"{POST_URL_34}{post_id}"
+                    title = post["tags"]
+                    await save_post(post_id, post_url, title, file_url, tag)
+    except Exception as e:
+        print(f"Error in post {post_id}: {e}")
+
+    # Задержка перед следующей проверкой
+    await asyncio.sleep(10)  # Проверяем каждые 60 секунд
+
+# Основной цикл для проверки новых постов V
+async def monitor_website_34_V():
+    try:
+        viewed_tags = UNWANTED_TAGS_34
+        for tag in TAGS_34_V:
+            html = await fetch_html(f"{WEBSITE_34}{RATING_POST}{tag}{viewed_tags}&limit={LIMIT}&json=1")
             viewed_tags =  f"{viewed_tags}+-{tag}"
             if not html:
                 print("Failed to load HTML, skipping iteration.")
@@ -386,7 +418,8 @@ async def main():
     await load_sent_posts()  # Загружаем перед стартом
     try:
         while True:
-            await monitor_website_34()
+            await monitor_website_34_T()
+            await monitor_website_34_V()
             await send_posts()
             await asyncio.sleep(60)  # Ждём 60 секунд перед следующим запросом
     except (KeyboardInterrupt, asyncio.CancelledError):
