@@ -41,7 +41,7 @@ MAX_SIZE_VIDEO_MB = 50  # Максимальный размер видео в MB
 LIMIT = 40 #Лимит прогрузки постов по одному тегу
 DATA_FOLDER = "temp_data"  # Папка где хранятся временно скачанные файлы
 SAVE_FILE = "sent_posts.pkl"# Файл данными об отправленных постах
-MAX_POSTS = 70 #Количество постов для сохранения в отправленных
+MAX_POSTS_SAVE = 150 #Количество постов для сохранения в отправленных
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Папка, где лежит main.py
 
 # FFmpeg мультимедийный фреймворк для работы с медиафайлами
@@ -59,7 +59,7 @@ else:
 
 
 posts = []  # Неотправленные посты
-sent_posts = defaultdict(lambda: deque(maxlen=MAX_POSTS))  # ID отправленных постов (отдельно для каждого сайта) с авто удалением старых записей
+sent_posts = defaultdict(lambda: deque(maxlen=MAX_POSTS_SAVE))  # ID отправленных постов (отдельно для каждого сайта) с авто удалением старых записей
 
 # Устанавливаем таймауты (убираем ошибку timeout)
 request = HTTPXRequest(connect_timeout=60, read_timeout=60)
@@ -75,8 +75,8 @@ async def load_sent_posts():
             if content:
                 loaded_data = pickle.loads(content)  # Десериализуем
                 # Преобразуем обратно в defaultdict с deque
-                sent_posts = defaultdict(lambda: deque(maxlen=MAX_POSTS),
-                                         {key: deque(value, maxlen=MAX_POSTS) for key, value in loaded_data.items()})
+                sent_posts = defaultdict(lambda: deque(maxlen=MAX_POSTS_SAVE),
+                                         {key: deque(value, maxlen=MAX_POSTS_SAVE) for key, value in loaded_data.items()})
                 print("Sent posts data successfully loaded!")
                 #print(f"sent_posts: {sent_posts}")
     except FileNotFoundError:
@@ -101,6 +101,11 @@ async def save_sent_posts():
 async def save_post(post_id, post_url, title, file_url,tag):
     if post_id in sent_posts[tag] or any(post["post_id"] == post_id for post in posts):
         #print(f"Пост {post_id} уже есть в базе. Пропускаем.")
+        return
+    # Фильтруем нежелательные расширения сразу
+    ext = get_file_extension(file_url)
+    if ext not in ('jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'mp4', 'avi', 'mov', 'mkv', 'webm', 'gif'):
+        print(f"Unsupported file skipped: {file_url}")
         return
 
     posts.append({
@@ -180,6 +185,8 @@ async def send_posts():
                                 parse_mode="HTML"))
         else:
             post["send"] = "close"
+            sent_posts[post["tag"]].append(post["post_id"])
+            posts.remove(post)
             continue  # Пропускаем неизвестные форматы
 
         first = False  # Сбрасываем флаг после первого элемента
@@ -334,7 +341,7 @@ async def download_media(url):
 
                         os.rename(compressed_path, file_path) # А потом как все операции с медиафайлом сделаны мы его переименуем, удаляем _temp
                     else:
-                        print("Error: Unsupported file format")
+                        print(f"Error: Unsupported file format {ext}")
                         return None
 
                     return file_path
