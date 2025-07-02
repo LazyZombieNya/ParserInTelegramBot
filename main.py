@@ -155,6 +155,8 @@ async def send_posts():
                                 media=file.read(),
                                 caption=caption_post if first else None,
                                 parse_mode="HTML"))
+                    else:
+                        post["send"] = "close"
         #Видео
         elif ext_file == "mp4":
             match post["send"]:
@@ -170,6 +172,8 @@ async def send_posts():
                                 media=file.read(),
                                 caption=caption_post if first else None,
                                 parse_mode="HTML"))
+                    else:
+                        post["send"] = "close"
         #GIF файлы
         elif ext_file == "gif":
             match post["send"]:
@@ -183,6 +187,8 @@ async def send_posts():
                                 media=file.read(),
                                 caption=caption_post if first else None,
                                 parse_mode="HTML"))
+                    else:
+                        post["send"] = "close"
         else:
             post["send"] = "close"
             sent_posts[post["tag"]].append(post["post_id"])
@@ -200,13 +206,6 @@ async def send_posts():
                     post["send"] = "err"
                 else:
                     post["send"] = "close"
-                    # Раз никак не удалось отправить пост то отправляем просто ссылку на пост и его теги
-                    caption_dont_send = f'<a href="{post["file_url"]}">🖼 Файл не загрузился, вот ссылка</a> \n\n {caption_post}'
-                    caption_dont = caption_dont_send[:LIMIT_CAPTION] + "..." if len(caption_dont_send) > LIMIT_CAPTION else caption_dont_send  # Обрезаем длину Caption если доходит до лимита
-                    try:
-                        await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=caption_dont, parse_mode="HTML")
-                    except Exception as e:
-                        print(f"Error sending message: {e}")
                 print(f'Error sending post {post["post_id"]}: {e}')
 
         if animations:
@@ -222,13 +221,6 @@ async def send_posts():
                         post["send"] = "err"
                 else:
                     post["send"] = "close"
-                    #Раз никак не удалось отправить пост то отправляем просто ссылку на пост и его теги
-                    caption_dont_send = f'<a href="{post["file_url"]}">🖼 Файл не загрузился, вот ссылка</a> \n\n {caption_post}'
-                    caption_dont = caption_dont_send[:LIMIT_CAPTION] + "..." if len(caption_dont_send) > LIMIT_CAPTION else caption_dont_send  # Обрезаем длину Caption если доходит до лимита
-                    try:
-                        await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=caption_dont, parse_mode="HTML")
-                    except Exception as e:
-                        print(f"Error sending message: {e}")
                 print(f'Error sending post {post["post_id"]}: {e}')
 
 
@@ -236,6 +228,15 @@ async def send_posts():
             # Добавляем в список отправленных и удаляем из текущего списка
             sent_posts[post["tag"]].append(post["post_id"])  # помечаем что пост отправлен
             posts.remove(post)  # Удаляем только отправленный пост
+            if post["send"] == "close":
+                # Раз никак не удалось отправить пост то отправляем просто ссылку на пост и его теги
+                caption_dont_send = f'<a href="{post["file_url"]}">🖼 Файл не загрузился, вот ссылка</a> \n\n {caption_post}'
+                caption_dont = caption_dont_send[:LIMIT_CAPTION] + "..." if len(
+                    caption_dont_send) > LIMIT_CAPTION else caption_dont_send  # Обрезаем длину Caption если доходит до лимита
+                try:
+                    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=caption_dont, parse_mode="HTML")
+                except Exception as e:
+                    print(f"Error sending message: {e}")
         await asyncio.sleep(10)  # Чтобы не спамил
 
 # Удаляет все файлы в папке DATA_FOLDER, если они есть.
