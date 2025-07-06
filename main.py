@@ -15,6 +15,7 @@ from PIL import Image
 from dotenv import load_dotenv
 from telegram import Bot, InputMediaPhoto, InputMediaVideo
 from telegram.request import HTTPXRequest
+import google.generativeai as genai
 
 load_dotenv()  # Загружаем переменные из .env
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -26,6 +27,9 @@ UNWANTED_TAGS_34 =os.getenv("UNWANTED_TAGS_34")  # Нежелательные т
 WEBSITE_34 = os.getenv("WEBSITE_34")
 POST_URL_34 = os.getenv("POST_URL_34")
 RATING_POST = os.getenv("RATING_POST")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL")
+PROMPT_FOR_TITLE = os.getenv("PROMPT_FOR_TITLE")
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"}
 
@@ -43,6 +47,10 @@ DATA_FOLDER = "temp_data"  # Папка где хранятся временно
 SAVE_FILE = "sent_posts.pkl"# Файл данными об отправленных постах
 MAX_POSTS_SAVE = 150 #Количество постов для сохранения в отправленных
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Папка, где лежит main.py
+
+# Инициализация Gemini
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel(GEMINI_MODEL)
 
 # FFmpeg мультимедийный фреймворк для работы с медиафайлами
 if platform.system() == "Windows":
@@ -131,8 +139,10 @@ async def send_posts():
         first = True
         media_group = []
         animations = []  # Список для GIF-анимаций
-
-        caption_full = f'<a href="{post["post_url"]}">Пост {post["post_id"]}</a> : {post["title"]}'  # Эта будет ссылкой на пост
+        title_post = await generate_description_from_tags(post["title"])
+        if not title_post.strip():  # если пусто или только пробелы
+            title_post = post["title"]
+        caption_full = f'<a href="{post["post_url"]}">Пост {post["post_id"]}</a> : {title_post}'  # Эта будет ссылкой на пост
         caption_post = caption_full[:LIMIT_CAPTION] + "..." if len(caption_full) > LIMIT_CAPTION else caption_full #Обрезаем длину Caption если доходит до лимита
         ext_file = get_file_extension(post['file_url'])
         if post["tag"] in TAGS_34_T:
@@ -238,6 +248,23 @@ async def send_posts():
                 except Exception as e:
                     print(f"Error sending message: {e}")
         await asyncio.sleep(10)  # Чтобы не спамил
+
+
+async def generate_description_from_tags(tags: str) -> str:
+    prompt = f"""Ты — бот, создающий описание по тегам.
+Вот список тегов: {tags}.
+{PROMPT_FOR_TITLE}"""
+
+    try:
+        response = await asyncio.to_thread(model.generate_content, prompt)
+        if response and response.text:
+            return response.text.strip()
+        else:
+            return ""
+    except Exception as e:
+        print(f"Ошибка генерации описания: {e}")
+        return ""
+
 
 # Удаляет все файлы в папке DATA_FOLDER, если они есть.
 async def clear_data_folder():
