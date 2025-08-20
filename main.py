@@ -338,7 +338,10 @@ async def download_media(url):
 
     ext = get_file_extension(url)
     if ext == "jpg": ext = "JPEG"  # Pillow не поддерживает "JPG", только "JPEG"
-    filename = f"temp_{url.split('/')[-1].lower()[:50]}.{ext}"
+    #filename = f"temp_{url.split('/')[-1].lower()[:50]}.{ext}"
+    name_only = os.path.splitext(url.split("/")[-1])[0].lower() # имя файла без расширения, приведённое к нижнему регистру.
+    filename = f"temp_{name_only[:40]}.{ext.lower()}"
+
     os.makedirs(DATA_FOLDER, exist_ok=True)  # Создаем папку Data, если её нет
     file_path = os.path.join(DATA_FOLDER, filename)
 
