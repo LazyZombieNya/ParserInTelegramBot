@@ -27,11 +27,18 @@
 
    ```env
    TELEGRAM_BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
-   TELEGRAM_CHAT_ID=YOUR_TELEGRAM_CHAT_ID
+   TELEGRAM_CHAT_ID_T=YOUR_TELEGRAM_CHAT_ID_FOR_ALL
+   TELEGRAM_CHAT_ID_V=YOUR_TELEGRAM_CHAT_ID_FOR_VIDEO
+   TAGS_34_T = anime,star_wars,female
+   TAGS_34_V = video
+   UNWANTED_TAGS_34 = +-male+-bara
+   WEBSITE_34 = https://api.rule34.xxx/index.php?page=dapi&s=post&q=index&tags=
+   POST_URL_34 = https://rule34.xxx/index.php?page=post&s=view&id=
+   RATING_POST = score:>=200+
+   GEMINI_API_KEY = YOUR_GEMINI_API_KEY
+   GEMINI_MODEL = gemini-2.0-flash
+   PROMPT_FOR_TITLE = Сформулируй краткое описание поста в 1–2 предложениях на русском языке, без хэштегов, ссылок и технических деталей (POV, 3D, CGI, рендер, формат,изображение, видео и пр.). Оставь только персонажей, вселенную (фандом), обстановку и общую суть действия.
 
-   TAGS_34=anime,star_wars,female
-   WEBSITE_34=https://api.rule34.xxx/index.php?page=dapi&s=post&q=index&tags=
-   POST_URL_34=https://rule34.xxx/index.php?page=post&s=view&id=
    ```
 
 ## ▶️ Запуск
