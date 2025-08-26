@@ -26,6 +26,7 @@ TAGS_34_V = os.getenv("TAGS_34_V", "").split(",")
 UNWANTED_TAGS_34 =os.getenv("UNWANTED_TAGS_34")  # Нежелательные теги, посты с этим тегом будут пропущены
 WEBSITE_34 = os.getenv("WEBSITE_34")
 POST_URL_34 = os.getenv("POST_URL_34")
+API_R34 = os.getenv("API_R34")
 RATING_POST = os.getenv("RATING_POST")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL")
@@ -406,11 +407,13 @@ async def fetch_html(url):
 
 # Основной цикл для проверки новых постов T
 async def monitor_website_34_T():
+    post_id = None
     try:
         viewed_tags = UNWANTED_TAGS_34
         for tag in TAGS_34_T:
-            html = await fetch_html(f"{WEBSITE_34}{RATING_POST}{tag}{viewed_tags}&limit={LIMIT}&json=1")
+            html = await fetch_html(f"{WEBSITE_34}{RATING_POST}{tag}{viewed_tags}&limit={LIMIT}&json=1{API_R34}")
             viewed_tags =  f"{viewed_tags}+-{tag}"
+            print(html)
             if not html:
                 print("Failed to load HTML, skipping iteration.")
                 continue  # Пропускаем обработку этой страницы
@@ -430,11 +433,13 @@ async def monitor_website_34_T():
 
 # Основной цикл для проверки новых постов V
 async def monitor_website_34_V():
+    post_id = None
     try:
         viewed_tags = UNWANTED_TAGS_34
         for tag in TAGS_34_V:
-            html = await fetch_html(f"{WEBSITE_34}{RATING_POST}{tag}{viewed_tags}&limit={LIMIT}&json=1")
+            html = await fetch_html(f"{WEBSITE_34}{RATING_POST}{tag}{viewed_tags}&limit={LIMIT}&json=1{API_R34}")
             viewed_tags =  f"{viewed_tags}+-{tag}"
+            print(html)
             if not html:
                 print("Failed to load HTML, skipping iteration.")
                 continue  # Пропускаем обработку этой страницы
