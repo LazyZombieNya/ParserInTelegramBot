@@ -45,7 +45,8 @@ MAX_SIZE_VIDEO_MB = 50  # Максимальный размер видео в MB
 # Списки
 LIMIT = 40 #Лимит прогрузки постов по одному тегу
 DATA_FOLDER = "temp_data"  # Папка где хранятся временно скачанные файлы
-SAVE_FILE = "sent_posts.pkl"# Файл данными об отправленных постах
+SAVE_FILE = ("sent"
+             "_posts.pkl")# Файл данными об отправленных постах
 MAX_POSTS_SAVE = 150 #Количество постов для сохранения в отправленных
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Папка, где лежит main.py
 
@@ -241,7 +242,10 @@ async def send_posts():
             posts.remove(post)  # Удаляем только отправленный пост
             if post["send"] == "close":
                 # Раз никак не удалось отправить пост то отправляем просто ссылку на пост и его теги
-                caption_dont_send = f'<a href="{post["file_url"]}">🖼 Файл не загрузился, вот ссылка</a> \n\n {caption_post}'
+                IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "bmp", "webp"}
+                ext = get_file_extension(post["file_url"]).lower()
+                img_caption = "🖼 Файл изображения" if ext in IMAGE_EXTENSIONS else "📺 Видео файл"
+                caption_dont_send = f'<a href="{post["file_url"]}">{img_caption} не загрузился, вот ссылка</a> \n\n {caption_post}'
                 caption_dont = caption_dont_send[:LIMIT_CAPTION] + "..." if len(
                     caption_dont_send) > LIMIT_CAPTION else caption_dont_send  # Обрезаем длину Caption если доходит до лимита
                 try:
@@ -300,8 +304,15 @@ async def compress_video(input_path, output_path):
     command = [
         FFMPEG_PATH, "-y", "-i", input_path,
         "-vcodec", "libx264", "-crf", "28", "-preset", "fast",
-        "-b:v", "1M", output_path
+        "-b:v", "1M", "-threads", "1", output_path
     ]
+
+    # command = [
+    #
+    #     FFMPEG_PATH, "-y", "-i", input_path,
+    #     "-vcodec", "libx264", "-crf", "28", "-preset", "fast",
+    #     "-b:v", "1M", output_path
+    # ]
 
     process = await asyncio.create_subprocess_exec(
         *command,
@@ -413,10 +424,10 @@ async def monitor_website_34_T():
         for tag in TAGS_34_T:
             html = await fetch_html(f"{WEBSITE_34}{RATING_POST}{tag}{viewed_tags}&limit={LIMIT}&json=1{API_R34}")
             viewed_tags =  f"{viewed_tags}+-{tag}"
-            print(html)
-            if not html:
-                print("Failed to load HTML, skipping iteration.")
-                continue  # Пропускаем обработку этой страницы
+
+            if not html or not isinstance(html, list):
+                print("No posts received or wrong response format, skipping iteration.")
+                continue  # Пропускаем обработку если нет ничего
 
             for post in html:
                 post_id = post["id"]
@@ -439,10 +450,10 @@ async def monitor_website_34_V():
         for tag in TAGS_34_V:
             html = await fetch_html(f"{WEBSITE_34}{RATING_POST}{tag}{viewed_tags}&limit={LIMIT}&json=1{API_R34}")
             viewed_tags =  f"{viewed_tags}+-{tag}"
-            print(html)
-            if not html:
-                print("Failed to load HTML, skipping iteration.")
-                continue  # Пропускаем обработку этой страницы
+
+            if not html or not isinstance(html, list):
+                print("No posts received or wrong response format, skipping iteration.")
+                continue  # Пропускаем обработку если нет ничего
 
             for post in html:
                 post_id = post["id"]
