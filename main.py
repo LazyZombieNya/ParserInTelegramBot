@@ -1,4 +1,5 @@
 import asyncio
+import signal
 import html
 import os
 import pickle
@@ -45,10 +46,24 @@ MAX_SIZE_VIDEO_MB = 50  # Максимальный размер видео в MB
 # Списки
 LIMIT = 40 #Лимит прогрузки постов по одному тегу
 DATA_FOLDER = "temp_data"  # Папка где хранятся временно скачанные файлы
-SAVE_FILE = ("sent"
-             "_posts.pkl")# Файл данными об отправленных постах
+SAVE_FILE = "sent_posts.pkl" # Файл данными об отправленных постах
 MAX_POSTS_SAVE = 150 #Количество постов для сохранения в отправленных
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Папка, где лежит main.py
+
+posts = []  # Неотправленные посты
+sent_posts = defaultdict(lambda: deque(maxlen=MAX_POSTS_SAVE))  # ID отправленных постов (отдельно для каждого сайта) с авто удалением старых записей
+
+#Флаг команды остановки бота
+stop_event = asyncio.Event()
+
+# Функция, обрабатывающая сигнал SIGTERM
+def handle_sigterm():
+    """когда systemd отправляет процессу сигнал SIGTERM (при systemctl stop или restart).
+    Она просто устанавливает флаг stop_event.
+    После этого цикл while not stop_event.is_set(): остановится — и программа перейдёт к finally:"""
+
+    print("Received SIGTERM, preparing to shut down...")
+    stop_event.set()
 
 # Инициализация Gemini
 genai.configure(api_key=GEMINI_API_KEY)
@@ -67,9 +82,6 @@ else:
         )
     FFMPEG_PATH = "ffmpeg"
 
-
-posts = []  # Неотправленные посты
-sent_posts = defaultdict(lambda: deque(maxlen=MAX_POSTS_SAVE))  # ID отправленных постов (отдельно для каждого сайта) с авто удалением старых записей
 
 # Устанавливаем таймауты (убираем ошибку timeout)
 request = HTTPXRequest(connect_timeout=60, read_timeout=60)
@@ -469,18 +481,22 @@ async def monitor_website_34_V():
     await asyncio.sleep(10)  # Проверяем каждые 60 секунд
 
 async def main():
+    # Подписываемся на сигнал systemd
+    loop = asyncio.get_running_loop()# Получает текущий цикл событий asyncio.
+    loop.add_signal_handler(signal.SIGTERM, handle_sigterm)
+
     await load_sent_posts()  # Загружаем перед стартом
     try:
-        while True:
+        while not stop_event.is_set():# Цикл продолжается, пока не получен SIGTERM.
             await monitor_website_34_T()
             await monitor_website_34_V()
             await send_posts()
             await asyncio.sleep(60)  # Ждём 60 секунд перед следующим запросом
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        print("The bot is shutting down...")
     finally:
         await save_sent_posts()  # Сохранение перед выходом
-        await clear_data_folder() # Удаляем скачанные файлы
+        await clear_data_folder()  # Удаляем скачанные файлы
+        print("Shutdown complete.")
+
 
 
 # Запуск программы
