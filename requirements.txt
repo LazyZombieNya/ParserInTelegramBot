@@ -5,7 +5,9 @@ Pillow~=11.1.0
 python-dotenv~=1.1.0
 python-telegram-bot~=22.0
 httpx  # для HTTPXRequest
-
+ffmpeg
+google-generativeai
+google-genai
 ffmpeg~=1.4
 google~=3.0.0
 protobuf~=5.29.5

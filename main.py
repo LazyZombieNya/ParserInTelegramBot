@@ -12,11 +12,13 @@ from urllib.parse import urlparse
 import aiofiles
 import aiohttp
 import ffmpeg
+import httpx
 from PIL import Image
 from dotenv import load_dotenv
 from telegram import Bot, InputMediaPhoto, InputMediaVideo
+from telegram.ext import Application, ApplicationBuilder, ContextTypes, AIORateLimiter
 from telegram.request import HTTPXRequest
-import google.generativeai as genai
+from google import genai
 
 load_dotenv()  # Загружаем переменные из .env
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -31,12 +33,15 @@ API_R34 = os.getenv("API_R34")
 RATING_POST = os.getenv("RATING_POST")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_MODEL = os.getenv("GROQ_MODEL")
+GROQ_URL = os.getenv("GROQ_URL")
 PROMPT_FOR_TITLE = os.getenv("PROMPT_FOR_TITLE")
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"}
 
 # Ограничения Telegram
-LIMIT_CAPTION = 1024  # Лимит символов описания поста телеграмм
+LIMIT_CAPTION = 400 #1024 # Лимит символов описания поста телеграмм
 LIMIT_TEXT_MSG = 4096  # Лимит символов для одного сообщения телеграмм
 MAX_MEDIA_PER_GROUP = 10  # Лимит Telegram на медиа-группу
 MAX_SIZE_IMG_MB = 10  # Максимальный размер фото в MB
@@ -53,21 +58,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Папка, где ле
 posts = []  # Неотправленные посты
 sent_posts = defaultdict(lambda: deque(maxlen=MAX_POSTS_SAVE))  # ID отправленных постов (отдельно для каждого сайта) с авто удалением старых записей
 
-#Флаг команды остановки бота
-stop_event = asyncio.Event()
-
-# Функция, обрабатывающая сигнал SIGTERM
-def handle_sigterm():
-    """когда systemd отправляет процессу сигнал SIGTERM (при systemctl stop или restart).
-    Она просто устанавливает флаг stop_event.
-    После этого цикл while not stop_event.is_set(): остановится — и программа перейдёт к finally:"""
-
-    print("Received SIGTERM, preparing to shut down...")
-    stop_event.set()
-
 # Инициализация Gemini
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel(GEMINI_MODEL)
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 # FFmpeg мультимедийный фреймворк для работы с медиафайлами
 if platform.system() == "Windows":
@@ -89,7 +81,7 @@ request = HTTPXRequest(connect_timeout=60, read_timeout=60)
 bot = Bot(token=TELEGRAM_BOT_TOKEN, request=request)  # Увеличенный таймаут
 
 #Загрузка отправленных постов sent_posts из файла SAVE_FILE
-async def load_sent_posts():
+async def load_sent_posts(app: Application):
     global sent_posts
     try:
         async with aiofiles.open(SAVE_FILE, "rb") as file:
@@ -106,7 +98,7 @@ async def load_sent_posts():
     except Exception as e:
         print(f"Error loading: {e}")
 #Сохранение отправленных постов sent_posts в файл SAVE_FILE
-async def save_sent_posts():
+async def save_sent_posts(app: Application):
     print("Saving data before exiting...")
 
     # Преобразуем defaultdict в обычный dict, иначе pickle не сможет его сохранить
@@ -269,18 +261,66 @@ async def send_posts():
 
 async def generate_description_from_tags(tags: str) -> str:
     prompt = f"""Ты — бот, создающий описание по тегам.
-Вот список тегов: {tags}.
-{PROMPT_FOR_TITLE}"""
+    Вот список тегов: {tags}.
+    {PROMPT_FOR_TITLE}"""
 
+    # 1. Попытка через Gemini
     try:
-        response = await asyncio.to_thread(model.generate_content, prompt)
-        if response and response.text:
+        response = await asyncio.to_thread(
+            client.models.generate_content,
+            model=GEMINI_MODEL,
+            contents=prompt,
+        )
+
+        if response and getattr(response, "text", None):
             return response.text.strip()
-        else:
-            return ""
-    except Exception as e:
-        print(f"Ошибка генерации описания: {e}")
+
+        raise RuntimeError("Gemini вернул пустой ответ")
+
+    except Exception as gemini_error:
+        print(f"Gemini error: {gemini_error}")
+
+    # 2. Fallback на GROQ
+    try:
+        return await generate_with_groq(prompt)
+    except Exception as groq_error:
+        print(f"GROQ error: {groq_error}")
         return ""
+
+    # try:
+    #     response = await asyncio.to_thread(
+    #         client.models.generate_content,
+    #         model=GEMINI_MODEL,
+    #         contents=prompt,
+    #     )
+    #
+    #     if response and getattr(response, "text", None):
+    #         return response.text.strip()
+    #
+    #     return ""
+    # except Exception as e:
+    #     print(f"Ошибка генерации описания: {e}")
+    #     return ""
+
+async def generate_with_groq(prompt: str) -> str:
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    payload = {
+        "model": GROQ_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.6,
+        #"max_tokens": 40,  # примерно 20–25 слов на русском
+    }
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(GROQ_URL, headers=headers, json=payload)
+        response.raise_for_status()
+
+        data = response.json()
+        return data["choices"][0]["message"]["content"].strip()
 
 
 # Удаляет все файлы в папке DATA_FOLDER, если они есть.
@@ -371,6 +411,22 @@ async def download_media(url):
 
     try:
         async with aiohttp.ClientSession() as session:
+            # Проверяем размер файла перед загрузкой (HEAD запрос)
+            if ext in ['mp4', 'avi', 'mov', 'mkv', 'webm']:
+                async with session.head(url, headers=headers) as head_response:
+                    if head_response.status == 200:
+                        content_length = head_response.headers.get('Content-Length')
+                        if content_length:
+                            file_size_mb = int(content_length) / (1024 * 1024)
+
+                            # Примерная оценка: если файл больше MAX_SIZE_VIDEO_MB * 2,
+                            # то даже после сжатия вряд ли уместится
+                            # Можно настроить коэффициент (например, 1.5, 2, 3)
+                            if file_size_mb > MAX_SIZE_VIDEO_MB * 2:
+                                print(f"Видео слишком большое ({file_size_mb:.2f} MB), пропускаем: {url}")
+                                return None
+                            elif file_size_mb > MAX_SIZE_VIDEO_MB:
+                                print(f"Видео {file_size_mb:.2f} MB, попробуем сжать")
             async with session.get(url, headers=headers) as response:
                 if response.status == 200:
                     file_bytes = await response.read()  # Скачиваем файл как байты
@@ -387,7 +443,7 @@ async def download_media(url):
                         if ext == "gif":  # Всегда конвертируем GIF → MP4
                             compressed_path = file_path.replace(".gif", ".mp4")
                             await gif_to_mp4(temp_path, compressed_path)
-                        elif os.path.getsize(temp_path) < MAX_SIZE_VIDEO_MB * 1024 * 1024:  # Сжатие видео до MAX_SIZE_VIDEO_MB
+                        elif os.path.getsize(temp_path) < MAX_SIZE_VIDEO_MB * 1024 * 1024:  # Сжатие видео если больше MAX_SIZE_VIDEO_MB
                             #print(f"Видео {temp_path} меньше {MAX_SIZE_VIDEO_MB} МБ, сжатие не требуется.")
                             compressed_path = temp_path  # Используем как есть
                         else:
@@ -429,7 +485,7 @@ async def fetch_html(url):
                 return None  # Вернем None, если страница не загрузилась
 
 # Основной цикл для проверки новых постов T
-async def monitor_website_34_T():
+async def monitor_website_34_T(app: Application):
     post_id = None
     try:
         viewed_tags = UNWANTED_TAGS_34
@@ -455,7 +511,7 @@ async def monitor_website_34_T():
     await asyncio.sleep(10)  # Проверяем каждые 60 секунд
 
 # Основной цикл для проверки новых постов V
-async def monitor_website_34_V():
+async def monitor_website_34_V(app: Application):
     post_id = None
     try:
         viewed_tags = UNWANTED_TAGS_34
@@ -480,25 +536,45 @@ async def monitor_website_34_V():
     # Задержка перед следующей проверкой
     await asyncio.sleep(10)  # Проверяем каждые 60 секунд
 
-async def main():
-    # Подписываемся на сигнал systemd
-    loop = asyncio.get_running_loop()# Получает текущий цикл событий asyncio.
-    loop.add_signal_handler(signal.SIGTERM, handle_sigterm)
-
-    await load_sent_posts()  # Загружаем перед стартом
+async def monitor_website(context: ContextTypes.DEFAULT_TYPE):
     try:
-        while not stop_event.is_set():# Цикл продолжается, пока не получен SIGTERM.
-            await monitor_website_34_T()
-            await monitor_website_34_V()
-            await send_posts()
-            await asyncio.sleep(60)  # Ждём 60 секунд перед следующим запросом
-    finally:
-        await save_sent_posts()  # Сохранение перед выходом
-        await clear_data_folder()  # Удаляем скачанные файлы
-        print("Shutdown complete.")
+        await monitor_website_34_T(context.application)
+        await monitor_website_34_V(context.application)
+        await send_posts()
+        await asyncio.sleep(60)  # Ждём 60 секунд перед следующим запросом
+    except Exception as e:
+        print(f"Error in monitor_website: {e}")
 
 
 
 # Запуск программы
 if __name__ == "__main__":
-    asyncio.run(main())  # Запуск главной асинхронной функции
+    #asyncio.run(main())  # Запуск главной асинхронной функции
+    # 1. Настраиваем RateLimiter (Решает проблему Flood Control)
+    rate_limiter = AIORateLimiter(
+        overall_max_rate=30,  # Не более 30 сообщений в секунду (общий лимит)
+        overall_time_period=1,
+        group_time_period=60,  # Групповые лимиты
+        max_retries=5  # Сколько раз повторять при ошибке сети
+    )
+
+    # 2. Создаем приложение
+    application = (
+        ApplicationBuilder()
+        .token(TELEGRAM_BOT_TOKEN)
+        .request(request)
+        .rate_limiter(rate_limiter)  # Подключаем лимитер
+        .post_init(load_sent_posts)  # Загрузка данных при старте
+        .post_shutdown(save_sent_posts)  # Сохранение данных при выходе (SIGTERM)
+        .build()
+    )
+
+    # 3. Добавляем задачу мониторинга в очередь
+    # run_repeating запускает monitor_website_job каждые 60 секунд
+    # first=1 означает первый запуск через 1 секунду после старта
+    application.job_queue.run_repeating(monitor_website, interval=180, first=1)
+
+    # 4. Запускаем бота (Polling)
+    # Это блокирующая операция, которая сама обрабатывает сигналы systemd
+    print("Bot started via PTB Application")
+    application.run_polling()
