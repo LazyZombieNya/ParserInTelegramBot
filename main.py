@@ -57,6 +57,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Папка, где ле
 
 posts = []  # Неотправленные посты
 sent_posts = defaultdict(lambda: deque(maxlen=MAX_POSTS_SAVE))  # ID отправленных постов (отдельно для каждого сайта) с авто удалением старых записей
+send_posts_lock = asyncio.Lock()
+recorded_sent_posts = False # Флаг сохраненных постов
 
 # Инициализация Gemini
 client = genai.Client(api_key=GEMINI_API_KEY)
@@ -133,14 +135,19 @@ async def save_post(post_id, post_url, title, file_url,tag):
     #print(f"Добавлен пост {post_id}")
 
 # Функция отправки постов в Телеграм
-async def send_posts():
-    global posts
+async def send_posts(app: Application):
+    global posts, recorded_sent_posts
 
     if not posts:
         #print("Нет новых постов для отправки.")
         await clear_data_folder() #Если все посты отправлены, то скачанные можно удалять
+        if recorded_sent_posts:
+            await save_sent_posts(app)
+            recorded_sent_posts = False
+
         return
 
+    recorded_sent_posts = True
     for post in posts[:]:  # Копия списка, чтобы можно было изменять оригинал
         first = True
         media_group = []
@@ -312,7 +319,7 @@ async def generate_with_groq(prompt: str) -> str:
         "model": GROQ_MODEL,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.6,
-        #"max_tokens": 40,  # примерно 20–25 слов на русском
+        #"max_tokens": 40,  # примерно 20–25 слов на русском, обрезает предложение
     }
 
     async with httpx.AsyncClient(timeout=30) as client:
@@ -507,8 +514,6 @@ async def monitor_website_34_T(app: Application):
     except Exception as e:
         print(f"Error in post {post_id}: {e}")
 
-    # Задержка перед следующей проверкой
-    await asyncio.sleep(10)  # Проверяем каждые 60 секунд
 
 # Основной цикл для проверки новых постов V
 async def monitor_website_34_V(app: Application):
@@ -533,15 +538,17 @@ async def monitor_website_34_V(app: Application):
     except Exception as e:
         print(f"Error in post {post_id}: {e}")
 
-    # Задержка перед следующей проверкой
-    await asyncio.sleep(10)  # Проверяем каждые 60 секунд
-
 async def monitor_website(context: ContextTypes.DEFAULT_TYPE):
     try:
         await monitor_website_34_T(context.application)
         await monitor_website_34_V(context.application)
-        await send_posts()
-        await asyncio.sleep(60)  # Ждём 60 секунд перед следующим запросом
+        if send_posts_lock.locked():
+            print("send_posts already running, skip")
+            return
+
+        async with send_posts_lock:
+            await send_posts(context.application)
+        # await asyncio.sleep(60)  # Ждём 60 секунд перед следующим запросом
     except Exception as e:
         print(f"Error in monitor_website: {e}")
 
