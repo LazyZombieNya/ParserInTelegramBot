@@ -20,6 +20,7 @@ from telegram.ext import Application, ApplicationBuilder, ContextTypes, AIORateL
 from telegram.request import HTTPXRequest
 from google import genai
 
+
 load_dotenv()  # Загружаем переменные из .env
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID_T = os.getenv("TELEGRAM_CHAT_ID_T")
@@ -77,7 +78,7 @@ else:
     FFMPEG_PATH = "ffmpeg"
 
 
-# Устанавливаем таймауты (убираем ошибку timeout)
+# Устанавливаем тайм-ауты (убираем ошибку timeout)
 request = HTTPXRequest(connect_timeout=60, read_timeout=60)
 # Инициализация бота
 bot = Bot(token=TELEGRAM_BOT_TOKEN, request=request)  # Увеличенный таймаут
@@ -267,8 +268,7 @@ async def send_posts(app: Application):
 
 
 async def generate_description_from_tags(tags: str) -> str:
-    prompt = f"""Ты — бот, создающий описание по тегам.
-    Вот список тегов: {tags}.
+    prompt = f"""Here is a list of tags: {tags}.
     {PROMPT_FOR_TITLE}"""
 
     # 1. Попытка через Gemini
