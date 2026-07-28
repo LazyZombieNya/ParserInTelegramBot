@@ -4,7 +4,23 @@ services:
     container_name: parser34
     restart: unless-stopped
 
-    # Блок env_file удален. Переменные загружаем кнопкой в Portainer.
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID_T=${TELEGRAM_CHAT_ID_T}
+      - TELEGRAM_CHAT_ID_V=${TELEGRAM_CHAT_ID_V}
+      - TAGS_34_T=${TAGS_34_T}
+      - TAGS_34_V=${TAGS_34_V}
+      - UNWANTED_TAGS_34=${UNWANTED_TAGS_34}
+      - WEBSITE_34=${WEBSITE_34}
+      - POST_URL_34=${POST_URL_34}
+      - RATING_POST=${RATING_POST}
+      - API_R34=${API_R34}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_MODEL=${GROQ_MODEL}
+      - GROQ_URL=${GROQ_URL}
+      - PROMPT_FOR_TITLE=${PROMPT_FOR_TITLE}
 
     volumes:
       - /opt/parser34/sent_posts.pkl:/app/sent_posts.pkl
