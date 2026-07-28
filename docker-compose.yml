@@ -1,0 +1,11 @@
+services:
+  parser34:
+    build: .
+    container_name: parser34
+    restart: unless-stopped
+
+    # Блок env_file удален. Переменные загружаем кнопкой в Portainer.
+
+    volumes:
+      - /opt/parser34/sent_posts.pkl:/app/sent_posts.pkl
+      - /temp_data/parser34:/app/temp_data
