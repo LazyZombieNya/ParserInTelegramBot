@@ -163,28 +163,44 @@ async def send_posts(app: Application):
 
         media_group = []
         animations = []
-        local_file_path = None
+        local_files = []  # Список для хранения путей к файлам
+        open_file_handles = []  # Список для открытых файловых объектов (чтобы потом закрыть)
 
         # Если статус err, сразу качаем файл
         if post["send"] == "err":
-            local_file_path = await download_media(post["file_url"])
-            if not local_file_path:
+            local_files = await download_media(post["file_url"])
+            if not local_files:
                 post["send"] = "close"
 
         if post["send"] != "close":
-            media_source = open(local_file_path, 'rb') if local_file_path else post["file_url"]
+            # Если файлы были скачаны, перебираем их
+            if local_files:
+                for i, path in enumerate(local_files):
+                    media_source = open(path, 'rb')
+                    open_file_handles.append(media_source)
 
-            if ext_file in ("jpeg", "jpg", "png"):
-                media_group.append(InputMediaPhoto(media=media_source, caption=caption_post, parse_mode="HTML"))
-            elif ext_file == "mp4":
-                media_group.append(InputMediaVideo(media=media_source, caption=caption_post, parse_mode="HTML"))
-            elif ext_file == "gif":
-                if local_file_path:  # Если скачали GIF, то media_processor его уже конвертнул в MP4
-                    media_group.append(InputMediaVideo(media=media_source, caption=caption_post, parse_mode="HTML"))
-                else:
-                    animations.append(post["file_url"])
+                    # Подпись добавляем только к первому элементу группы
+                    current_caption = caption_post if i == 0 else ""
+
+                    if ext_file in ("jpeg", "jpg", "png", "webp"):
+                        media_group.append(
+                            InputMediaPhoto(media=media_source, caption=current_caption, parse_mode="HTML"))
+                    elif ext_file == "mp4":
+                        media_group.append(
+                            InputMediaVideo(media=media_source, caption=current_caption, parse_mode="HTML"))
+                    elif ext_file == "gif":
+                        media_group.append(
+                            InputMediaVideo(media=media_source, caption=current_caption, parse_mode="HTML"))
             else:
-                post["send"] = "close"
+                # Если файл не скачивался, отправляем по URL
+                if ext_file in ("jpeg", "jpg", "png", "webp"):
+                    media_group.append(InputMediaPhoto(media=post["file_url"], caption=caption_post, parse_mode="HTML"))
+                elif ext_file == "mp4":
+                    media_group.append(InputMediaVideo(media=post["file_url"], caption=caption_post, parse_mode="HTML"))
+                elif ext_file == "gif":
+                    animations.append(post["file_url"])
+                else:
+                    post["send"] = "close"
 
         # Отправка медиагруппы
         if media_group and post["send"] != "close":
@@ -218,9 +234,9 @@ async def send_posts(app: Application):
                     else:
                         post["send"] = "close"
 
-        # Закрываем локальный файл, если открывали
-        if local_file_path:
-            media_source.close()
+        # Закрываем все локальные файлы, если открывали
+        for handle in open_file_handles:
+            handle.close()
 
             # Обработка статусов
         if post["send"] in {"yes", "close"}:

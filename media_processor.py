@@ -10,6 +10,7 @@ import aiohttp
 import aiofiles
 import ffmpeg
 from PIL import Image
+import math
 
 # Ограничения Telegram
 MAX_SIZE_IMG_MB = 10  # Максимальный размер фото в MB
@@ -23,6 +24,9 @@ MIN_VIDEO_BITRATE = 80_000  # Нижний предел битрейта вид�
 
 DATA_FOLDER = "temp_data"  # Папка где хранятся временно скачанные файлы
 BASE_DIR = os.path.dirname(os.path.abspath(__file__)) # Место положение скрипта
+
+# Отключаем защиту Pillow от "DecompressionBomb", чтобы открывать огромные файлы
+Image.MAX_IMAGE_PIXELS = None
 
 # FFmpeg мультимедийный фреймворк для работы с медиафайлами
 if platform.system() == "Windows":
@@ -138,6 +142,38 @@ def _fit_telegram_photo_dimensions(img):
         img = img.resize((width, height), Image.LANCZOS)
 
     return img
+
+"""
+    Разрезает длинное изображение на части по вертикали.
+    max_height: Максимальная высота одного куска. 4000 оптимально для Telegram.
+    """
+def split_long_image(image_path, max_height=4000):
+
+    img = Image.open(image_path)
+    width, height = img.size
+
+    # Если картинка укладывается в лимиты, просто возвращаем её же списком
+    if height <= max_height:
+        return [image_path]
+
+    parts = []
+    base_dir = os.path.dirname(image_path)
+    base_name, ext = os.path.splitext(os.path.basename(image_path))
+
+    for i in range(0, height, max_height):
+        # Координаты для обрезки (left, upper, right, lower)
+        box = (0, i, width, min(i + max_height, height))
+        cropped_img = img.crop(box)
+
+        # Конвертируем в RGB, если это необходимо для сохранения в JPEG
+        if cropped_img.mode in ("RGBA", "P") and ext.lower() in (".jpg", ".jpeg"):
+            cropped_img = cropped_img.convert("RGB")
+
+        part_path = os.path.join(base_dir, f"{base_name}_part_{i // max_height}{ext}")
+        cropped_img.save(part_path)
+        parts.append(part_path)
+
+    return parts
 
 #Сжатие картинок если они больше MAX_SIZE_IMG_MB
 async def compress_image(image_path_or_bytes, max_size=MAX_SIZE_IMG_MB * 1024 * 1024):
@@ -355,10 +391,26 @@ async def download_media(url):
                         return None
 
                     if ext in ['jpeg', 'png', 'bmp', 'webp']:
-                        compressed_bytes = await compress_image(temp_path)
-                        async with aiofiles.open(file_path, 'wb') as img_file:
-                            await img_file.write(compressed_bytes)
+                        # Разрезаем файл (если он длинный)
+                        image_parts = split_long_image(temp_path, max_height=4000)
+
+                        final_paths = []
+                        for i, part in enumerate(image_parts):
+                            # Сжимаем каждый кусок стандартной функцией
+                            compressed_bytes = await compress_image(part)
+                            part_final_path = f"{file_path}_part{i}.{ext}" if len(image_parts) > 1 else file_path
+
+                            async with aiofiles.open(part_final_path, 'wb') as img_file:
+                                await img_file.write(compressed_bytes)
+
+                            final_paths.append(part_final_path)
+
+                            # Удаляем временный кусок, если он был создан
+                            if part != temp_path:
+                                os.remove(part)
+
                         os.remove(temp_path)
+                        return final_paths  # Возвращаем список путей
 
                     elif ext in ['mp4', 'avi', 'mov', 'mkv', 'webm', 'gif']:
                         if ext == "gif":
@@ -379,7 +431,7 @@ async def download_media(url):
                         os.remove(temp_path)
                         return None
 
-                    return file_path
+                    return [file_path]
                 else:
                     print(f"Ошибка HTTP: {response.status} для {url}")
     except asyncio.TimeoutError:
