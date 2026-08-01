@@ -144,32 +144,36 @@ def _fit_telegram_photo_dimensions(img):
     return img
 
 """
-    Разрезает длинное изображение на части по вертикали.
-    max_height: Максимальная высота одного куска. 4000 оптимально для Telegram.
+Разрезает длинное изображение на равные части по вертикали.
     """
 def split_long_image(image_path, max_height=4000):
-
     img = Image.open(image_path)
     width, height = img.size
 
-    # Если картинка укладывается в лимиты, просто возвращаем её же списком
+    # Если картинка укладывается в лимиты, возвращаем её же
     if height <= max_height:
         return [image_path]
+
+    # Вычисляем количество частей и высоту каждой из них
+    num_parts = math.ceil(height / max_height)
+    part_height = math.ceil(height / num_parts)
 
     parts = []
     base_dir = os.path.dirname(image_path)
     base_name, ext = os.path.splitext(os.path.basename(image_path))
 
-    for i in range(0, height, max_height):
-        # Координаты для обрезки (left, upper, right, lower)
-        box = (0, i, width, min(i + max_height, height))
+    for i in range(num_parts):
+        top = i * part_height
+        # Убеждаемся, что нижняя граница не выходит за пределы картинки
+        bottom = min((i + 1) * part_height, height)
+
+        box = (0, top, width, bottom)
         cropped_img = img.crop(box)
 
-        # Конвертируем в RGB, если это необходимо для сохранения в JPEG
         if cropped_img.mode in ("RGBA", "P") and ext.lower() in (".jpg", ".jpeg"):
             cropped_img = cropped_img.convert("RGB")
 
-        part_path = os.path.join(base_dir, f"{base_name}_part_{i // max_height}{ext}")
+        part_path = os.path.join(base_dir, f"{base_name}_part_{i}{ext}")
         cropped_img.save(part_path)
         parts.append(part_path)
 
@@ -391,8 +395,9 @@ async def download_media(url):
                         return None
 
                     if ext in ['jpeg', 'png', 'bmp', 'webp']:
+                        shutil.move(temp_path, file_path)
                         # Разрезаем файл (если он длинный)
-                        image_parts = split_long_image(temp_path, max_height=4000)
+                        image_parts = split_long_image(file_path, max_height=4000)
 
                         final_paths = []
                         for i, part in enumerate(image_parts):
@@ -405,11 +410,14 @@ async def download_media(url):
 
                             final_paths.append(part_final_path)
 
-                            # Удаляем временный кусок, если он был создан
-                            if part != temp_path:
+                            # Удаляем сырой нарезанный кусок, чтобы не забивать диск
+                            if part != file_path:
                                 os.remove(part)
 
-                        os.remove(temp_path)
+                        # Удаляем оригинальный целый файл, если он был разрезан на части
+                        if len(image_parts) > 1 and os.path.exists(file_path):
+                            os.remove(file_path)
+
                         return final_paths  # Возвращаем список путей
 
                     elif ext in ['mp4', 'avi', 'mov', 'mkv', 'webm', 'gif']:

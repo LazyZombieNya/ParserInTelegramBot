@@ -72,11 +72,11 @@ async def load_sent_posts(app: Application):
                 sent_posts = defaultdict(lambda: deque(maxlen=MAX_POSTS_SAVE),
                                          {key: deque(value, maxlen=MAX_POSTS_SAVE) for key, value in loaded_data.items()})
                 print("Sent posts data successfully loaded!")
-                #print(f"sent_posts: {sent_posts}")
     except FileNotFoundError:
         print("File with saved posts not found, create a new one.")
     except Exception as e:
         print(f"Error loading: {e}")
+
 #Сохранение отправленных постов sent_posts в файл SAVE_FILE
 async def save_sent_posts(app: Application):
     #print("Saving data before exiting...")
@@ -175,12 +175,14 @@ async def send_posts(app: Application):
         if post["send"] != "close":
             # Если файлы были скачаны, перебираем их
             if local_files:
+                # Вычисляем индекс первого файла в ПОСЛЕДНЕМ чанке (группе)
+                last_chunk_start_idx = ((len(local_files) - 1) // MAX_MEDIA_PER_GROUP) * MAX_MEDIA_PER_GROUP
                 for i, path in enumerate(local_files):
                     media_source = open(path, 'rb')
                     open_file_handles.append(media_source)
 
-                    # Подпись добавляем только к первому элементу группы
-                    current_caption = caption_post if i == 0 else ""
+                    # Подпись добавляем ТОЛЬКО к первому элементу последнего альбома
+                    current_caption = caption_post if i == last_chunk_start_idx else ""
 
                     if ext_file in ("jpeg", "jpg", "png", "webp"):
                         media_group.append(
@@ -202,16 +204,28 @@ async def send_posts(app: Application):
                 else:
                     post["send"] = "close"
 
-        # Отправка медиагруппы
+        # Отправка медиагруппы с обходом лимита в 10 файлов
         if media_group and post["send"] != "close":
             try:
-                await bot.send_media_group(chat_id=TELEGRAM_CHAT_ID, media=media_group)
+                chunk_size = MAX_MEDIA_PER_GROUP
+
+                # Дробим media_group на списки по 10 элементов
+                for i in range(0, len(media_group), chunk_size):
+                    chunk = media_group[i:i + chunk_size]
+
+                    # Отправляем текущий кусок альбома
+                    await bot.send_media_group(chat_id=TELEGRAM_CHAT_ID, media=chunk)
+
+                    # Если это не последний кусок, делаем паузу, чтобы не словить Flood Control
+                    if i + chunk_size < len(media_group):
+                        await asyncio.sleep(3)
+
                 post["send"] = "yes"
             except Exception as e:
-                print(f'Error sending post {post["post_id"]}: {e}')
-                print(type(e).__name__)
-                print(repr(e))
-                # Если ошибка из списка повторений, сразу помечаем как 'err', чтобы на следующем круге попробовать повторно скачать
+                status = "идет на повторную загрузку" if is_retryable_error(e) else "будет пропущен"
+                print(
+                    f"[ПОСТ {post['post_id']} | {post['tag']}] Ошибка отправки группы: {type(e).__name__} ({e}). Статус: {status}")
+
                 if is_retryable_error(e):
                     post["send"] = "err"
                 else:
@@ -225,9 +239,7 @@ async def send_posts(app: Application):
                                              parse_mode="HTML")
                     post["send"] = "yes"
                 except Exception as e:
-                    print(f'Error sending GIF {post["post_id"]}: {e}')
-                    print(type(e).__name__)
-                    print(repr(e))
+                    print(f'Error sending GIF {post["post_id"]}: {repr(e)}')
                     # Если ошибка из списка повторений, сразу помечаем как 'err', чтобы на следующем круге попробовать повторно скачать
                     if is_retryable_error(e):
                         post["send"] = "err"
@@ -242,8 +254,8 @@ async def send_posts(app: Application):
         if post["send"] in {"yes", "close"}:
             sent_posts[post["tag"]].append(post["post_id"])
             posts.remove(post)
-
             if post["send"] == "close":
+                print(f"Dont sending post: {post["post_id"]}")
                 ext = get_file_extension(post["file_url"]).lower()
                 img_caption = "🖼 Файл изображения" if ext in {"jpg", "jpeg", "png", "gif", "bmp",
                                                               "webp"} else "📺 Видео файл"
@@ -427,4 +439,5 @@ if __name__ == "__main__":
     # 4. Запускаем бота (Polling)
     # Это блокирующая операция, которая сама обрабатывает сигналы systemd
     print("Bot started via PTB Application")
-    application.run_polling()
+    # Запуск с запросом на удаление вебхука и сброс накопившейся очереди
+    application.run_polling(drop_pending_updates=True)
