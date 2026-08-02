@@ -21,6 +21,8 @@ services:
       - GROQ_MODEL=${GROQ_MODEL}
       - GROQ_URL=${GROQ_URL}
       - PROMPT_FOR_TITLE=${PROMPT_FOR_TITLE}
+      - PYTHONUNBUFFERED=1
+      - TZ=Asia/Yekaterinburg
 
     volumes:
       - /opt/parser34/sent_posts.pkl:/app/sent_posts.pkl
